@@ -535,6 +535,18 @@ class BOPDMDOperator(DMDOperator):
         Computational Optimization and Applications 54.3 (2013): 579-593
         by Dianne P. O'Leary and Bert W. Rust.
         """
+
+        # for context, the theory behind this algorithm is presented in Section 2.2.2
+        # of the Askham and Kutz paper ("Variable projection for multiple right-hand sides")
+
+        # H is the pre-process input data matrix (full rank or low rank reconstruction, depending on use_proj).
+        # init_alpha is the initial guess of the eigenvalues, which by default are calculated
+        # using Algorithm 4 from the Askham and Kutz paper.
+
+        # Phi is the matrix of exponentials, where Phi[i, j] = exp(t_i * alpha_j).
+        # dPhi is the derivative of Phi wrt the ith component of alpha. This is needed to compute the Jacobian,
+        # which is used to compute the step size in the Levenberg-Marquardt algorithm - see eq. (12) in Askham and Kutz.
+
         # Define M, IS, and IA.
         M, IS = H.shape
         IA = len(init_alpha)
@@ -567,19 +579,23 @@ class BOPDMDOperator(DMDOperator):
             """
             Update B for the current alpha.
             """
+
+            # note B are the DMD modes prior to normalization
+
             # Compute B using least squares.
             B = np.linalg.lstsq(Phi(alpha, t), H, rcond=None)[0]
 
             # Apply proximal operator if given, and if data isn't projected.
             if self._mode_prox is not None and not self._use_proj:
-                B = self._mode_prox(B)
+                B = self._mode_prox(B)  # looks like mode_prox has not been implemented yet (unless it needs to be provided by the user as an input)
 
             return B
 
         # Initialize values.
         _lambda = init_lambda
-        alpha = self._push_eigenvalues(init_alpha)
+        alpha = self._push_eigenvalues(init_alpha)  # constrain the eigenvalues to the desired constraints
         B = compute_B(alpha)
+        # compute the SVD of Phi(alpha, t) - see eq. (13) in Askham and Kutz
         U, S, Vh = self._compute_irank_svd(Phi(alpha, t), tolrank)
 
         # Initialize termination flags.
@@ -602,19 +618,21 @@ class BOPDMDOperator(DMDOperator):
                 dphi_temp = dPhi(alpha, t, i)
                 ut_dphi = csr_matrix(U.conj().T @ dphi_temp)
                 uut_dphi = csr_matrix(U @ ut_dphi)
-                djac_a = (dphi_temp - uut_dphi) @ B
-                djac_matrix[:, i] = djac_a.ravel(order="F")
+                djac_a = (dphi_temp - uut_dphi) @ B  # note this is eq. (13) in Askham and Kutz
+                djac_matrix[:, i] = djac_a.ravel(order="F")  # flatten the matrix into a 1D array
 
                 # Compute the full expression for the Jacobian.
+                # use_fulljac is True by default
                 if use_fulljac:
                     transform = np.linalg.multi_dot([U, np.linalg.inv(S), Vh])
                     dphit_res = csr_matrix(dphi_temp.conj().T @ residual)
-                    djac_b = transform @ dphit_res
+                    djac_b = transform @ dphit_res  # this is eq. (14) in Askham and Kutz
                     djac_matrix[:, i] += djac_b.ravel(order="F")
 
                 # Scale for the Levenberg algorithm.
                 scales[i] = 1
                 # Scale for the Levenberg-Marquardt algorithm.
+                # use_levmarq is True by default, unsure what the scales are used for
                 if use_levmarq:
                     scales[i] = min(np.linalg.norm(djac_matrix[:, i]), 1)
                     scales[i] = max(scales[i], 1e-6)
@@ -754,12 +772,12 @@ class BOPDMDOperator(DMDOperator):
         # Save the modes, eigenvalues, and amplitudes respectively.
         w = B.T
         e = alpha
-        b = np.sqrt(np.sum(np.abs(w) ** 2, axis=0))
+        b = np.sqrt(np.sum(np.abs(w) ** 2, axis=0))  # these are the mode amplitudes
 
         # Normalize the modes and the amplitudes.
         inds_small = np.abs(b) < (10 * np.finfo(float).eps * np.max(b))
         b[inds_small] = 1.0
-        w = w.dot(np.diag(1 / b))
+        w = w.dot(np.diag(1 / b))  # this is equation (48) in Askham and Kutz
         w[:, inds_small] = 0.0
         b[inds_small] = 0.0
 
@@ -1352,6 +1370,10 @@ class BOPDMD(DMDBase):
                     raise ValueError(msg)
 
     def _initialize_alpha(self):
+
+        # alpha here refers to line 1 of Algorithm 2/3 of Askham & Kutz (2018)
+        # see Section 3.2 (Initialization) in the paper - Algorithm 4
+
         """
         Uses projected trapezoidal rule to approximate the eigenvalues of A in
             z' = Az.
@@ -1406,11 +1428,12 @@ class BOPDMD(DMDBase):
             raise ValueError(msg)
 
         # Compute the rank of the fit.
+        # self.snapshots are the preprocessed snapshots (i.e. the data matrix X)
         self._svd_rank = int(compute_rank(self.snapshots, self._svd_rank))
 
         # Set/check the projection basis.
         if self._proj_basis is None and self._use_proj:
-            self._proj_basis = compute_svd(self.snapshots, self._svd_rank)[0]
+            self._proj_basis = compute_svd(self.snapshots, self._svd_rank)[0]  # this returns the first r columns of U (i.e. the POD spatial modes)
         elif self._proj_basis is None and not self._use_proj:
             self._proj_basis = compute_svd(self.snapshots, -1)[0]
         elif (
@@ -1452,6 +1475,8 @@ class BOPDMD(DMDBase):
 
         # Define the snapshots that will be used for fitting.
         if self._use_proj:
+            # note here it is projecting the snapshots onto the POD basis (i.e. the POD modes in U)
+            # note that U.T.dot(X) is equal to V.T.dot(S) (equation 54 - step 3 of Algorithm 3 - in Askham & Kutz (2018))
             snp = self._proj_basis.conj().T.dot(self.snapshots)
         else:
             snp = self.snapshots
