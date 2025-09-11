@@ -42,7 +42,7 @@ class DMD(DMDBase):
     :type sorted_eigs: {'real', 'abs'} or False
     :param tikhonov_regularization: Tikhonov parameter for the regularization.
         If `None`, no regularization is applied, if `float`, it is used as the
-        :math:`\lambda` tikhonov parameter.
+        :math:`\\lambda` tikhonov parameter.
     :type tikhonov_regularization: int or float
     """
 
