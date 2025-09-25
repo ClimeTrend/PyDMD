@@ -835,7 +835,7 @@ def test_fit_econ_with_bagging():
     np.testing.assert_allclose(bopdmd_econ.amplitudes, bopdmd.amplitudes)
     np.testing.assert_allclose(forecast_econ.real, forecast.real)
 
-    
+
 def test_parallel_bopdmd():
     """Test that sequential and parallel bagging give the same results."""
     svd_rank = 2
